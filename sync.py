@@ -62,8 +62,15 @@ def parse_iso_datetime(dt_str):
     return dt
 
 def load_cache():
-    """Loads state, folder path cache, and historical run metrics."""
-    cache = {"last_run": None, "history": [], "average_speed_bps": None, "folder_cache": {}}
+    """Loads state, folder path cache, configuration settings, and historical run metrics."""
+    cache = {
+        "last_run": None, 
+        "history": [], 
+        "average_speed_bps": None, 
+        "folder_cache": {},
+        "folder_id": None,
+        "dest_path": None
+    }
     
     # Load from unified cache file if it exists
     if os.path.exists(CACHE_FILE):
@@ -77,7 +84,7 @@ def load_cache():
     return cache
 
 def save_cache(cache):
-    """Saves state, folder path cache, and metrics."""
+    """Saves state, folder path cache, configurations, and metrics."""
     try:
         with open(CACHE_FILE, "w") as f:
             json.dump(cache, f, indent=2)
@@ -195,7 +202,7 @@ def resolve_folder_path(service, folder_id, cache):
     """
     current_id = folder_id
     chain = []
-    root_id = "1uBmjninKFcEEsOlcwfmSefSYpP93x9Pb"
+    root_id = cache.get("folder_id")
     
     try:
         while current_id:
@@ -411,16 +418,66 @@ def main():
         action="store_true", 
         help="Force a full scan to check and redownload any missing local files."
     )
+    parser.add_argument(
+        "--folder-id",
+        type=str,
+        help="Configure or update the Google Drive Folder ID to sync."
+    )
+    parser.add_argument(
+        "--dest",
+        type=str,
+        help="Configure or update the local destination path."
+    )
     args = parser.parse_args()
     
     console.print(Panel("[bold cyan]Google Drive Sync DC Folder[/bold cyan]", border_style="cyan"))
     
-    folder_id = "1uBmjninKFcEEsOlcwfmSefSYpP93x9Pb"
-    dest_path = "C:\\Users\\ethan\\Desktop\\Transcriptions"
-    
     # Load unified state/cache
     cache = load_cache()
+    
+    # Apply CLI configuration updates if provided
+    config_updated = False
+    if args.folder_id:
+        cache["folder_id"] = args.folder_id.strip()
+        config_updated = True
+        console.print(f"[green]Google Drive Folder ID configured to: {cache['folder_id']}[/green]")
+    if args.dest:
+        cache["dest_path"] = os.path.abspath(os.path.expanduser(args.dest.strip()))
+        config_updated = True
+        console.print(f"[green]Local destination path configured to: {cache['dest_path']}[/green]")
+        
+    if config_updated:
+        save_cache(cache)
+        
+    # Interactive Onboarding Prompt if config is missing
+    if not cache.get("folder_id") or not cache.get("dest_path"):
+        console.print(Panel(
+            "[bold yellow]Configuration Setup[/bold yellow]\n\n"
+            "This is your first run, or configuration is missing. "
+            "Please provide your sync settings below.",
+            border_style="yellow"
+        ))
+        
+        if not cache.get("folder_id"):
+            folder_id_input = input("Enter your Google Drive Folder ID: ").strip()
+            while not folder_id_input:
+                folder_id_input = input("Folder ID cannot be empty. Enter Folder ID: ").strip()
+            cache["folder_id"] = folder_id_input
+            
+        if not cache.get("dest_path"):
+            dest_path_input = input("Enter local Destination Directory Path: ").strip()
+            while not dest_path_input:
+                dest_path_input = input("Path cannot be empty. Enter local Destination Path: ").strip()
+            cache["dest_path"] = os.path.abspath(os.path.expanduser(dest_path_input))
+            
+        save_cache(cache)
+        console.print("[bold green]Configuration successfully saved to sync_cache.json![/bold green]\n")
+        
+    folder_id = cache["folder_id"]
+    dest_path = cache["dest_path"]
+    
     last_run_str = cache.get("last_run")
+    filter_by_date = not args.full
     
     # We must do a full scan if explicitly requested, if there's no last run,
     # or if the folder_cache is completely empty.
